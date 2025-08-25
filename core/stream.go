@@ -1,7 +1,11 @@
 package core
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
+	"errors"
+	"sync"
 )
 
 type StreamCodec interface {
@@ -31,6 +35,11 @@ type StreamData interface {
 	// WithContext returns a new stream with the given context
 	WithContext(ctx context.Context)
 
+	// SetMetadata sets the metadata for the stream
+	SetMetadata(key string, value any)
+	// GetMetadata returns the metadata for the stream
+	GetMetadata(key string) (any, bool)
+
 	// Type returns the type of the stream
 	Type() StreamType
 
@@ -47,7 +56,9 @@ type StreamData interface {
 }
 
 type BaseStream struct {
-	ctx context.Context
+	ctx      context.Context
+	metadata map[string]any
+	mu       sync.Mutex
 }
 
 // Context returns the context for the stream
@@ -58,6 +69,23 @@ func (b *BaseStream) Context() context.Context {
 // WithContext returns a new stream with the given context
 func (b *BaseStream) WithContext(ctx context.Context) {
 	b.ctx = ctx
+}
+
+// GetMetadata returns the metadata for the stream
+func (b *BaseStream) GetMetadata(key string) (any, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.metadata[key], b.metadata != nil
+}
+
+// SetMetadata sets the metadata for the stream
+func (b *BaseStream) SetMetadata(key string, value any) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.metadata == nil {
+		b.metadata = make(map[string]any)
+	}
+	b.metadata[key] = value
 }
 
 // Type
@@ -85,20 +113,22 @@ type baseStreamCodec struct {
 
 // Encode encodes the given data into the stream
 func (b baseStreamCodec) Encode(sd StreamData) ([]byte, error) {
-	return []byte{}, nil
-	// buf := bytes.NewBuffer(nil)
-	// if err := gob.NewEncoder(buf).Encode(sd); err != nil {
-	// 	return nil, err
-	// }
-	// return buf.Bytes(), nil
+	bs, ok := sd.(*BaseStream)
+	if !ok {
+		return nil, errors.New("invalid stream data")
+	}
+	buf := bytes.NewBuffer(nil)
+	if err := gob.NewEncoder(buf).Encode(bs.metadata); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // Decode decodes the given data from the stream
 func (b baseStreamCodec) Decode(data []byte) (StreamData, error) {
-	return &BaseStream{}, nil
-	// var sd = &BaseStream{}
-	// if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&sd); err != nil {
-	// 	return nil, err
-	// }
-	// return sd, nil
+	metadata := make(map[string]any)
+	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&metadata); err != nil {
+		return nil, err
+	}
+	return &BaseStream{metadata: metadata}, nil
 }
