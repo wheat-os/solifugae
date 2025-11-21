@@ -5,5 +5,8 @@ import (
 )
 
 type Outputter interface {
-	Save(item core.StreamData) error
+	// Output 调用输出器
+	Output(item core.StreamData) error
+	// Close 关闭输出器
+	Close() error
 }

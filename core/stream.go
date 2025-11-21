@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+type baseStreamMetadataKey struct{}
+
 type StreamCodec interface {
 	// Encode encodes the stream data into bytes
 	Encode(sd StreamData) ([]byte, error)
@@ -56,9 +58,8 @@ type StreamData interface {
 }
 
 type BaseStream struct {
-	ctx      context.Context
-	metadata map[string]any
-	mu       sync.Mutex
+	ctx context.Context
+	mu  sync.Mutex
 }
 
 // Context returns the context for the stream
@@ -75,17 +76,34 @@ func (b *BaseStream) WithContext(ctx context.Context) {
 func (b *BaseStream) GetMetadata(key string) (any, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.metadata[key], b.metadata != nil
+	metadataValue := b.ctx.Value(baseStreamMetadataKey{})
+	metadata, ok := metadataValue.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	value, ok := metadata[key]
+	return value, ok
 }
 
 // SetMetadata sets the metadata for the stream
+// SetMetadata 方法用于设置流的元数据
+// 参数:
+//   - key: 元数据的键，字符串类型
+//   - value: 元数据的值，可以是任意类型
 func (b *BaseStream) SetMetadata(key string, value any) {
+	// 使用互斥锁保证并发安全
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.metadata == nil {
-		b.metadata = make(map[string]any)
+
+	// 从上下文中获取值（这里可能是未完成的代码）
+	metadataValue := b.ctx.Value(baseStreamMetadataKey{})
+	metadata, ok := metadataValue.(map[string]any)
+	if !ok {
+		metadata = make(map[string]any)
+		ctx := context.WithValue(b.ctx, baseStreamMetadataKey{}, metadata)
+		b.ctx = ctx
 	}
-	b.metadata[key] = value
+	metadata[key] = value
 }
 
 // Type
@@ -117,8 +135,14 @@ func (b baseStreamCodec) Encode(sd StreamData) ([]byte, error) {
 	if !ok {
 		return nil, errors.New("invalid stream data")
 	}
+
+	metadataValue := bs.Context().Value(baseStreamMetadataKey{})
+	metadata, ok := metadataValue.(map[string]any)
+	if !ok {
+		metadata = make(map[string]any)
+	}
 	buf := bytes.NewBuffer(nil)
-	if err := gob.NewEncoder(buf).Encode(bs.metadata); err != nil {
+	if err := gob.NewEncoder(buf).Encode(metadata); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
@@ -130,5 +154,6 @@ func (b baseStreamCodec) Decode(data []byte) (StreamData, error) {
 	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&metadata); err != nil {
 		return nil, err
 	}
-	return &BaseStream{metadata: metadata}, nil
+	ctx := context.WithValue(context.Background(), baseStreamMetadataKey{}, metadata)
+	return &BaseStream{ctx: ctx}, nil
 }

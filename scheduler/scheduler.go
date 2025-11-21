@@ -5,7 +5,11 @@ import (
 )
 
 type Scheduler interface {
-	SetStream(req *core.StreamData) error
+	SetStream(req core.StreamData) error
 
-	GetStream(req *core.StreamData) (core.StreamData, error)
+	GetStream() (core.StreamData, error)
+
+	HasPending() bool
+
+	Close() error
 }
